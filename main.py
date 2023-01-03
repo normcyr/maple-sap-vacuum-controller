@@ -142,11 +142,23 @@ def display_data(is_connected, env_data, start_vacuum_pump, lcd):
         else:
             is_connected_fr = "non"
         lcd.putstr(
-            f"Temp: {env_data['temperature']} C\nHumidite: {env_data['humidity']} %\nPression: {env_data['pressure']} hPa\nPompe? {start_vacuum_pump_fr} Wifi? {is_connected_fr}"
+            "Temp: {} C\nHumidite: {} %\nPression: {} hPa\nPompe? {} Wifi? {}".format(
+                env_data["temperature"],
+                env_data["humidity"],
+                env_data["pressure"],
+                start_vacuum_pump_fr,
+                is_connected_fr,
+            )
         )
     else:
         lcd.putstr(
-            f"Temp: {env_data['temperature']}C\nHumidity: {env_data['humidity']}%\nPressure: {env_data['pressure']}hPa\nPump? {start_vacuum_pump} Wifi? {is_connected}"
+            "Temp: {}C\nHumidity: {}%\nPressure: {}hPa\nPump? {} Wifi? {}".format(
+                env_data["temperature"],
+                env_data["humidity"],
+                env_data["pressure"],
+                start_vacuum_pump,
+                is_connected,
+            )
         )
 
 
