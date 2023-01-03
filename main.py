@@ -43,25 +43,30 @@ def connect_to_wifi():
     while not sta_if.isconnected():
         if time.ticks_diff(time.ticks_ms(), start) > timeout:
             print("Timeout")
+            is_connected = False
             break
-        print("connecting to network...")
+        print("Connecting to network...")
         sta_if.active(True)
         sta_if.connect(config.WIFI_SSID, config.WIFI_PASSWORD)
         while (
             not sta_if.isconnected()
             and time.ticks_diff(time.ticks_ms(), start) < timeout
         ):
-            print("connecting")
+            print("Connecting")
             time.sleep_ms(500)
     else:
-        print("network config:", sta_if.ifconfig())
+        print("Connected!")
+        print("Network configuration:", sta_if.ifconfig())
         a = sta_if.config("mac")
         print(
             "MAC {:02x}:{:02x}:{:02x}:{:02x}:{:02x}".format(
                 a[0], a[1], a[2], a[3], a[4]
             )
         )
+        is_connected = True
         settime()
+
+    return is_connected
 
 
 def get_env_data(dht_sensor, bme_sensor):
@@ -77,7 +82,7 @@ def get_env_data(dht_sensor, bme_sensor):
         # "humidity": float(bme_sensor.humidity[:-1]),
         "pressure": round(float(bme_sensor.pressure[:-3])),
     }
-    print(env_data)
+    print(f"Environmental data measured: {env_data}")
 
     return env_data
 
@@ -92,46 +97,37 @@ def control_vacuum_pump(start_vacuum_pump):
     else:
         relay.value(1)  # stops the pump
 
+    print(f"Pump can be started? {start_vacuum_pump}")
+
 
 def send_data_to_influxdb(env_data, start_vacuum_pump):
 
-    timestamp = round(time.time())
-    line_protocol_data = "{},sensor_id={} temperature={},humidity={},pressure={},pump_started={} {}".format(
-        config.ORGANIZATION,
-        config.SENSOR_ID,
-        env_data["temperature"],
-        env_data["humidity"],
-        env_data["pressure"],
-        start_vacuum_pump,
-        timestamp,
-    )
+    timestamp = (
+        round(time.time()) + 946684761
+    )  # time difference with the microcontroller
+    line_protocol_data = f"{config.ORGANIZATION},sensor_id={config.SENSOR_ID} temperature={env_data['temperature']},humidity={env_data['humidity']},pressure={env_data['pressure']},pump_started={start_vacuum_pump} {timestamp}"
     print(line_protocol_data)
 
-    baseurl = "http://{}:{}".format(config.INFLUXDB_URL, config.INFLUXDB_PORT)
+    baseurl = f"http://{config.INFLUXDB_URL}:{config.INFLUXDB_PORT}"
     precision = "s"
-    write_url = baseurl + "/api/v2/write?org={}&bucket={}&precision={}".format(
-        config.ORGANIZATION, config.BUCKET, precision
+    write_url = (
+        baseurl
+        + f"/api/v2/write?org={config.ORGANIZATION}&bucket={config.BUCKET}&precision={precision}"
     )
     headers = {
-        "Authorization": "Token {}".format(config.INFLUXDB_TOKEN),
+        "Authorization": f"Token {config.INFLUXDB_TOKEN}",
         "Content-Type": "text/plain; charset=utf-8",
         "Accept": "application/json",
     }
 
     try:
-        req_response = urequests.post(
-            write_url, headers=headers, data=line_protocol_data
-        )
-        print(req_response.status_code)
-    except urequests.exceptions.RequestException as e:  # This is the correct syntax
-        print(e)
-        print(
-            "The InfluxDB server does not seem to be running. Cannot write data to InfluxDB."
-        )
-        pass
+        urequests.post(write_url, headers=headers, data=line_protocol_data)
+        print("Data written to InfluxDB.")
+    except:
+        print("Could not connect or write to InfluxDB.")
 
 
-def display_data(env_data, start_vacuum_pump, lcd):
+def display_data(is_connected, env_data, start_vacuum_pump, lcd):
     # Print the environmental data to the LCD display
 
     lcd.clear()
@@ -141,22 +137,16 @@ def display_data(env_data, start_vacuum_pump, lcd):
             start_vacuum_pump_fr = "oui"
         else:
             start_vacuum_pump_fr = "non"
+        if is_connected:
+            is_connected_fr = "oui"
+        else:
+            is_connected_fr = "non"
         lcd.putstr(
-            "Temp: {} C\nHumidite: {} %\nPression: {} hPa\nPompe? {}".format(
-                env_data["temperature"],
-                env_data["humidity"],
-                env_data["pressure"],
-                start_vacuum_pump_fr,
-            )
+            f"Temp: {env_data['temperature']} C\nHumidite: {env_data['humidity']} %\nPression: {env_data['pressure']} hPa\nPompe? {start_vacuum_pump_fr} Wifi? {is_connected_fr}"
         )
     else:
         lcd.putstr(
-            "Temp: {}C\nHumidity: {}%\nPressure: {}hPa\nPump running? {}".format(
-                env_data["temperature"],
-                env_data["humidity"],
-                env_data["pressure"],
-                start_vacuum_pump,
-            )
+            f"Temp: {env_data['temperature']}C\nHumidity: {env_data['humidity']}%\nPressure: {env_data['pressure']}hPa\nPump? {start_vacuum_pump} Wifi? {is_connected}"
         )
 
 
@@ -176,25 +166,23 @@ def run(dht_sensor, i2c, bme_sensor, lcd):
 
     try:
         env_data = get_env_data(dht_sensor, bme_sensor)
+
         if env_data["temperature"] >= 1:
             start_vacuum_pump = True
         else:
             start_vacuum_pump = False
-        print(start_vacuum_pump)
-        control_vacuum_pump(start_vacuum_pump)
-        display_data(env_data, start_vacuum_pump, lcd)
 
-        try:
-            connect_to_wifi()
+        control_vacuum_pump(start_vacuum_pump)
+        is_connected = connect_to_wifi()
+        display_data(is_connected, env_data, start_vacuum_pump, lcd)
+        if is_connected:
             send_data_to_influxdb(env_data, start_vacuum_pump)
-        except Exception as e:
-            print(e)
+        else:
             print(
                 "Not connected to the wireless network. Cannot write data to InfluxDB at the moment."
             )
-            pass
-    except Exception as e:
-        print(e)
+
+    except:
         show_error()
 
 
