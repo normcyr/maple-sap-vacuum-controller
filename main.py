@@ -20,6 +20,7 @@ along with this program.  If not, see <https://www.gnu.org/licenses/>.
 import sys, time
 import dht
 import network
+import urequests
 
 from machine import Pin, I2C
 from ntptime import settime
@@ -92,20 +93,21 @@ def control_vacuum_pump(start_vacuum_pump):
         relay.value(1)  # stops the pump
 
 
-def send_data_to_influxdb(env_data):
+def send_data_to_influxdb(env_data, start_vacuum_pump):
 
-    timestamp = time.time() + 946684800  # epoch time is delta from January 1, 2000
-    line_protocol_data = "outside_environment,sensor_id={} temperature={},humidity={},pressure={} {}".format(
+    timestamp = round(time.time())
+    line_protocol_data = "{},sensor_id={} temperature={},humidity={},pressure={},pump_started={} {}".format(
+        config.ORGANIZATION,
         config.SENSOR_ID,
         env_data["temperature"],
         env_data["humidity"],
         env_data["pressure"],
+        start_vacuum_pump,
         timestamp,
     )
     print(line_protocol_data)
 
-    port = str(8086)
-    baseurl = "http://{}:{}".format(config.INFLUXDB_URL, port)
+    baseurl = "http://{}:{}".format(config.INFLUXDB_URL, config.INFLUXDB_PORT)
     precision = "s"
     write_url = baseurl + "/api/v2/write?org={}&bucket={}&precision={}".format(
         config.ORGANIZATION, config.BUCKET, precision
@@ -115,7 +117,18 @@ def send_data_to_influxdb(env_data):
         "Content-Type": "text/plain; charset=utf-8",
         "Accept": "application/json",
     }
-    requests.post(write_url, headers=headers, data=line_protocol_data)
+
+    try:
+        req_response = urequests.post(
+            write_url, headers=headers, data=line_protocol_data
+        )
+        print(req_response.status_code)
+    except urequests.exceptions.RequestException as e:  # This is the correct syntax
+        print(e)
+        print(
+            "The InfluxDB server does not seem to be running. Cannot write data to InfluxDB."
+        )
+        pass
 
 
 def display_data(env_data, start_vacuum_pump, lcd):
@@ -151,7 +164,7 @@ def show_error():
     # The LED from the ESP8266 will flash upon error
 
     led = Pin(config.LED_PIN, Pin.OUT)
-    for i in range(3):
+    for i in range(5):
         led.off()
         time.sleep(0.5)
         led.on()
@@ -173,12 +186,15 @@ def run(dht_sensor, i2c, bme_sensor, lcd):
 
         try:
             connect_to_wifi()
-            send_data_to_influxdb(env_data)
+            send_data_to_influxdb(env_data, start_vacuum_pump)
         except Exception as e:
-            sys.print_exception(e)
+            print(e)
+            print(
+                "Not connected to the wireless network. Cannot write data to InfluxDB at the moment."
+            )
             pass
     except Exception as e:
-        sys.print_exception(e)
+        print(e)
         show_error()
 
 

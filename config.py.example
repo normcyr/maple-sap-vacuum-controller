@@ -15,32 +15,32 @@ GNU General Public License for more details.
 
 You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+rename to config.py and replace with your parameters
 """
 
-"""rename to config.py and replace with your parameters"""
 
+# General configuration parameters
 LED_PIN = 2  # LED on Wemos D1 mini
-
 DHT_PIN = 12  # D6 on Wemos D1 mini
 RELAY_PIN = 14  # D5 on Wemos D1 mini
 SCL_PIN = 5  # D1 on Wemos D1 mini
 SDA_PIN = 4  # D2 on Wemos D1 mini
-
 BMP280_ADDRESS = 118
 TEMP_CALFACTOR = -1.5
-
 LCD_ADDRESS = 39
 LCD_TOTALROWS = 4
 LCD_TOTALCOLUMNS = 20
+LANGUAGE = "FR" # FR for French, else the LCD display will be written in English
 
-LANGUAGE = "FR"
-
+# Wifi network configuration
 WIFI_SSID = "ma_cabane_a_sucre"
 WIFI_PASSWORD = "j_aime_le_sirop"
 
+# InfluxDB configuration
 INFLUXDB_TOKEN = "le_sirop_d-erable__l-or_doree_du_Quebec!"
-INFLUXDB_URL = "192.168.1.2"
+INFLUXDB_URL = "localhost"
+INFLUXDB_PORT = 8086
 ORGANIZATION = "cabane_a_sucre"
 BUCKET = "vacuum_pump"
-
 SENSOR_ID = "env_inside_box"

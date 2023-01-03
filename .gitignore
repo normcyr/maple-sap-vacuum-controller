@@ -1,2 +1,6 @@
 config.py
+test.py
+
+influxdb-docker-data-volume/
 venv/
+__pycache__/
