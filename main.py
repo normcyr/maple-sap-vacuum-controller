@@ -17,10 +17,10 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-import sys, time
+import sys, time, json
 import dht
 import network
-import urequests
+import urequests as requests
 
 from machine import Pin, I2C
 from ntptime import settime
@@ -73,39 +73,66 @@ def get_env_data(dht_sensor, bme_sensor):
     # Measure the environmental data
     # The temperature is calibrated with a factor
 
+    timestamp = (
+        round(time.time()) + 946684761
+    )  # time difference with the microcontroller
     dht_sensor.measure()
-    cal_factor = config.TEMP_CALFACTOR
+    cal_factor = config.TEMPCAL_FACTOR
     env_data = {
         "temperature": dht_sensor.temperature() + cal_factor,
         "humidity": dht_sensor.humidity(),
+        "pressure": round(float(bme_sensor.pressure[:-3])),
         # "temperature": float(bme_sensor.temperature[:-1]),
         # "humidity": float(bme_sensor.humidity[:-1]),
-        "pressure": round(float(bme_sensor.pressure[:-3])),
+        "timestamp": timestamp,
     }
     print(f"Environmental data measured: {env_data}")
 
     return env_data
 
 
-def control_vacuum_pump(start_vacuum_pump):
+def control_vacuum_pump(env_data):
     # This function will also control the different solenoid valves
 
     relay = Pin(config.RELAY_PIN, Pin.OUT)
 
-    if start_vacuum_pump:
+    if env_data["temperature"] >= config.START_TEMP:
+        start_vacuum_pump = True
         relay.value(0)  # use the normally open configuration
-    else:
+    elif env_data["temperature"] <= config.STOP_TEMP:
+        start_vacuum_pump = False
         relay.value(1)  # stops the pump
+    else:
+        pass  # keep the last state
 
-    print(f"Pump can be started? {start_vacuum_pump}")
+    print(f"Can the pump be started? {start_vacuum_pump}")
+
+    return start_vacuum_pump
+
+
+def send_data_to_http(env_data, start_vacuum_pump):
+
+    env_data["pump"] = start_vacuum_pump
+    env_data_json = json.dumps(env_data)
+    print(env_data_json)
+    headers = {
+        "Content-Type": "text/plain; charset=utf-8",
+        "Accept": "application/json",
+    }
+    try:
+        requests.post(
+            url=f"{config.HTTP_SERVER_URL}:{config.HTTP_SERVER_PORT}",
+            json=env_data_json,
+            headers=headers,
+        )
+        print("Data written to HTTP server.")
+    except:
+        print("Could not make a POST request")
 
 
 def send_data_to_influxdb(env_data, start_vacuum_pump):
 
-    timestamp = (
-        round(time.time()) + 946684761
-    )  # time difference with the microcontroller
-    line_protocol_data = f"{config.ORGANIZATION},sensor_id={config.SENSOR_ID} temperature={env_data['temperature']},humidity={env_data['humidity']},pressure={env_data['pressure']},pump_started={start_vacuum_pump} {timestamp}"
+    line_protocol_data = f"{config.ORGANIZATION},sensor_id={config.SENSOR_ID} temperature={env_data['temperature']},humidity={env_data['humidity']},pressure={env_data['pressure']},pump_started={start_vacuum_pump} {env_data['timestamp']}"
     print(line_protocol_data)
 
     baseurl = f"http://{config.INFLUXDB_URL}:{config.INFLUXDB_PORT}"
@@ -121,7 +148,7 @@ def send_data_to_influxdb(env_data, start_vacuum_pump):
     }
 
     try:
-        urequests.post(write_url, headers=headers, data=line_protocol_data)
+        requests.post(write_url, headers=headers, data=line_protocol_data)
         print("Data written to InfluxDB.")
     except:
         print("Could not connect or write to InfluxDB.")
@@ -142,7 +169,7 @@ def display_data(is_connected, env_data, start_vacuum_pump, lcd):
         else:
             is_connected_fr = "non"
         lcd.putstr(
-            "Temp: {} C\nHumidite: {} %\nPression: {} hPa\nPompe? {} Wifi? {}".format(
+            "Temp: {} C\nHumidite: {} %\nPression: {} hPa\nPompe? {} {}".format(
                 env_data["temperature"],
                 env_data["humidity"],
                 env_data["pressure"],
@@ -152,7 +179,7 @@ def display_data(is_connected, env_data, start_vacuum_pump, lcd):
         )
     else:
         lcd.putstr(
-            "Temp: {}C\nHumidity: {}%\nPressure: {}hPa\nPump? {} Wifi? {}".format(
+            "Temp: {}C\nHumidity: {}%\nPressure: {}hPa\nPump? {} {}".format(
                 env_data["temperature"],
                 env_data["humidity"],
                 env_data["pressure"],
@@ -174,20 +201,17 @@ def show_error():
     led.on()
 
 
-def run(dht_sensor, i2c, bme_sensor, lcd):
+def run(dht_sensor, bme_sensor, lcd):
 
     try:
         env_data = get_env_data(dht_sensor, bme_sensor)
-
-        if env_data["temperature"] >= 1:
-            start_vacuum_pump = True
-        else:
-            start_vacuum_pump = False
-
-        control_vacuum_pump(start_vacuum_pump)
+        start_vacuum_pump = control_vacuum_pump(env_data)
         is_connected = connect_to_wifi()
+
         display_data(is_connected, env_data, start_vacuum_pump, lcd)
+
         if is_connected:
+            send_data_to_http(env_data, start_vacuum_pump)
             send_data_to_influxdb(env_data, start_vacuum_pump)
         else:
             print(
@@ -211,10 +235,12 @@ def initialize():
     lcd.clear()
     lcd.hide_cursor()
     if config.LANGUAGE == "FR":
-        lcd.putstr("Bienvenue!\nSysteme vacuum Norm\nv0.1.0 2022-12-27 \n")
+        lcd.putstr(
+            "Bienvenue!\nSysteme vacuum Norm\n{}\n".format(config.CURRENT_VERSION)
+        )
     else:
-        lcd.putstr("Welcome!\nVacuum system Norm\nv0.1.0 2022-12-27 \n")
-    time.sleep(5)
+        lcd.putstr("Welcome!\nVacuum system Norm\n{}".format(config.CURRENT_VERSION))
+    time.sleep(3)
     lcd.backlight_off()
 
     return dht_sensor, i2c, bme_sensor, lcd

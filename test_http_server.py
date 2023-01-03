@@ -1,31 +1,26 @@
-import sys, time
+import sys, time, json
 import random
 import requests
 
 import config
 
 
-def send_data_to_influxdb(env_data, start_vacuum_pump):
+def send_data_to_http(env_data, start_vacuum_pump):
 
-    line_protocol_data = f"{config.ORGANIZATION},sensor_id={config.SENSOR_ID} temperature={env_data['temperature']},humidity={env_data['humidity']},pressure={env_data['pressure']},pump_started={start_vacuum_pump} {env_data['timestamp']}"
-    print(line_protocol_data)
-
-    baseurl = f"http://{config.INFLUXDB_URL}:{config.INFLUXDB_PORT}"
-    precision = "s"
-    write_url = (
-        baseurl
-        + f"/api/v2/write?org={config.ORGANIZATION}&bucket={config.BUCKET}&precision={precision}"
-    )
+    env_data["pump"] = start_vacuum_pump
+    env_data_json = json.dumps(env_data)
     headers = {
-        "Authorization": f"Token {config.INFLUXDB_TOKEN}",
         "Content-Type": "text/plain; charset=utf-8",
         "Accept": "application/json",
     }
-
     try:
         req_response = requests.post(
-            write_url, headers=headers, data=line_protocol_data
+            url=f"{config.HTTP_SERVER_URL}:{config.HTTP_SERVER_PORT}",
+            json=env_data_json,
+            headers=headers,
         )
+        print(env_data_json)
+        print("Data written to HTTP server.")
         print(req_response.status_code)
         req_response.raise_for_status()
     except requests.exceptions.HTTPError as errh:
@@ -53,5 +48,5 @@ if __name__ == "__main__":
         else:
             pass  # keep the last state
 
-        send_data_to_influxdb(env_data, start_vacuum_pump)
+        send_data_to_http(env_data, start_vacuum_pump)
         time.sleep(1)

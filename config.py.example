@@ -27,20 +27,29 @@ RELAY_PIN = 14  # D5 on Wemos D1 mini
 SCL_PIN = 5  # D1 on Wemos D1 mini
 SDA_PIN = 4  # D2 on Wemos D1 mini
 BMP280_ADDRESS = 118
-TEMP_CALFACTOR = -1.5
 LCD_ADDRESS = 39
 LCD_TOTALROWS = 4
 LCD_TOTALCOLUMNS = 20
-LANGUAGE = "FR" # FR for French, else the LCD display will be written in English
+LANGUAGE = "FR"  # FR for French, else the LCD display will be written in English
+
+TEMPCAL_FACTOR = -1.5
+START_TEMP = 1  # Temperature at which the pump will start
+STOP_TEMP = -2  # Temperature at which the pump will stop
 
 # Wifi network configuration
 WIFI_SSID = "ma_cabane_a_sucre"
 WIFI_PASSWORD = "j_aime_le_sirop"
 
+# HTTP server configuration
+HTTP_SERVER_URL = "http://localhost"
+HTTP_SERVER_PORT = 8080
+
 # InfluxDB configuration
 INFLUXDB_TOKEN = "le_sirop_d-erable__l-or_doree_du_Quebec!"
-INFLUXDB_URL = "localhost"
+INFLUXDB_URL = "http://localhost"
 INFLUXDB_PORT = 8086
 ORGANIZATION = "cabane_a_sucre"
 BUCKET = "vacuum_pump"
 SENSOR_ID = "env_inside_box"
+
+CURRENT_VERSION = "v0.1.1 2023-01-03"
