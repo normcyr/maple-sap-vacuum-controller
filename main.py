@@ -211,11 +211,13 @@ def run(dht_sensor, bme_sensor, lcd):
         display_data(is_connected, env_data, start_vacuum_pump, lcd)
 
         if is_connected:
-            send_data_to_http(env_data, start_vacuum_pump)
-            send_data_to_influxdb(env_data, start_vacuum_pump)
+            if config.SEND_DATA_HTTP:
+                send_data_to_http(env_data, start_vacuum_pump)
+            if config.SEND_DATA_INFLUXDB:
+                send_data_to_influxdb(env_data, start_vacuum_pump)
         else:
             print(
-                "Not connected to the wireless network. Cannot write data to InfluxDB at the moment."
+                "Not connected to the wireless network. Cannot write data to server at the moment."
             )
 
     except:
