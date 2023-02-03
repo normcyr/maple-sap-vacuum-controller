@@ -17,7 +17,7 @@ You should have received a copy of the GNU General Public License
 along with this program.  If not, see <https://www.gnu.org/licenses/>.
 """
 
-import sys, time, json
+import sys, time, json, socket
 import dht
 import network
 import urequests as requests
@@ -26,38 +26,45 @@ from machine import Pin, I2C
 from ntptime import settime
 
 import BME280
+import onewire, ds18x20
 from lcd_api import LcdApi
 from i2c_lcd import I2cLcd
 
 import config
 
 
+def start_ap(ap):
+    ap.active(True)
+    ap.config(essid=config.AP_SSID, password=config.AP_PWD)
+    print("Access point configured.")
+    print(ap.ifconfig())
+
+
 def connect_to_wifi():
-    ap = network.WLAN(network.AP_IF)  # create access-point interface
-    ap.active(False)  # deactivate the interface
 
-    sta_if = network.WLAN(network.STA_IF)
-
+    is_connected = False
+    sta = network.WLAN(network.STA_IF)
+    
     start = time.ticks_ms()
     timeout = 10000
-    while not sta_if.isconnected():
+    while not sta.isconnected():
         if time.ticks_diff(time.ticks_ms(), start) > timeout:
             print("Timeout")
+            print("Couldn't connect to the network. Check your parameters.")
             is_connected = False
             break
         print("Connecting to network...")
-        sta_if.active(True)
-        sta_if.connect(config.WIFI_SSID, config.WIFI_PASSWORD)
+        sta.active(True)
+        sta.connect(config.WIFI_SSID, config.WIFI_PASSWORD)
         while (
-            not sta_if.isconnected()
-            and time.ticks_diff(time.ticks_ms(), start) < timeout
+            not sta.isconnected() and time.ticks_diff(time.ticks_ms(), start) < timeout
         ):
             print("Connecting")
             time.sleep_ms(500)
     else:
         print("Connected!")
-        print("Network configuration:", sta_if.ifconfig())
-        a = sta_if.config("mac")
+        print("Network configuration:", sta.ifconfig())
+        a = sta.config("mac")
         print(
             "MAC {:02x}:{:02x}:{:02x}:{:02x}:{:02x}".format(
                 a[0], a[1], a[2], a[3], a[4]
@@ -69,21 +76,47 @@ def connect_to_wifi():
     return is_connected
 
 
-def get_env_data(dht_sensor, bme_sensor):
+def get_env_data(i2c):
     # Measure the environmental data
     # The temperature is calibrated with a factor
 
     timestamp = (
         round(time.time()) + 946684761
     )  # time difference with the microcontroller
-    dht_sensor.measure()
-    cal_factor = config.TEMPCAL_FACTOR
+
+    if config.DHT:
+        dht_sensor = dht.DHT22(Pin(config.DHT_PIN))
+        dht_sensor.measure()
+        cal_factor = config.TEMPCAL_FACTOR
+        temperature = dht_sensor.temperature() + cal_factor
+        humidity = dht_sensor.humidity()
+    else:
+        temperature = "N/A"
+        humidity = "N/A"
+    
+    # Future feature: using a DS18B20 temperature sensor
+    if config.ONEWIRE:
+        print("Using OneWire")
+        onewire_sensor = ds18x20.DS18X20(onewire.OneWire(config.ONEWIRE_PIN))
+        onewire_devices = onewire.scan()
+        onewire_sensor.convert_temp()
+        time.sleep_ms(750)
+        temperature_onewire = onewire_sensor.read_temp(onewire_devices[0])
+        print(f"There are {len(onewire_devices)} 1-wire temperature probes")
+        print(f"The temperature measured by the first one on the bus is {temperature_onewire}°C")
+    else:
+        temperature_onewire = "N/A"
+    
+    if config.BME280:
+        bme_sensor = BME280.BME280(i2c=i2c, address=int(config.BME280_ADDRESS))
+        pressure = round(float(bme_sensor.pressure[:-3]))
+    else:
+        pressure = "N/A"
+    
     env_data = {
-        "temperature": dht_sensor.temperature() + cal_factor,
-        "humidity": dht_sensor.humidity(),
-        "pressure": round(float(bme_sensor.pressure[:-3])),
-        # "temperature": float(bme_sensor.temperature[:-1]),
-        # "humidity": float(bme_sensor.humidity[:-1]),
+        "temperature": temperature,
+        "humidity": humidity,
+        "pressure": pressure,
         "timestamp": timestamp,
     }
     print(f"Environmental data measured: {env_data}")
@@ -169,7 +202,7 @@ def display_data(is_connected, env_data, start_vacuum_pump, lcd):
         else:
             is_connected_fr = "non"
         lcd.putstr(
-            "Temp: {} C\nHumidite: {} %\nPression: {} hPa\nPompe? {} {}".format(
+            "Temp: {} C\nHumidite: {} %\nPression: {} hPa\nPompe? {} WF {}".format(
                 env_data["temperature"],
                 env_data["humidity"],
                 env_data["pressure"],
@@ -179,7 +212,7 @@ def display_data(is_connected, env_data, start_vacuum_pump, lcd):
         )
     else:
         lcd.putstr(
-            "Temp: {}C\nHumidity: {}%\nPressure: {}hPa\nPump? {} {}".format(
+            "Temp: {}C\nHumidity: {}%\nPressure: {}hPa\nPump? {} WF {}".format(
                 env_data["temperature"],
                 env_data["humidity"],
                 env_data["pressure"],
@@ -201,12 +234,11 @@ def show_error():
     led.on()
 
 
-def run(dht_sensor, bme_sensor, lcd):
+def run(i2c, lcd, is_connected):
 
     try:
-        env_data = get_env_data(dht_sensor, bme_sensor)
+        env_data = get_env_data(i2c)
         start_vacuum_pump = control_vacuum_pump(env_data)
-        is_connected = connect_to_wifi()
 
         display_data(is_connected, env_data, start_vacuum_pump, lcd)
 
@@ -217,7 +249,7 @@ def run(dht_sensor, bme_sensor, lcd):
                 send_data_to_influxdb(env_data, start_vacuum_pump)
         else:
             print(
-                "Not connected to the wireless network. Cannot write data to server at the moment."
+                "Not connected to the wireless network. Not sending data to a server at the moment."
             )
 
     except:
@@ -225,30 +257,43 @@ def run(dht_sensor, bme_sensor, lcd):
 
 
 def initialize():
-    dht_sensor = dht.DHT22(Pin(config.DHT_PIN))  # D6 on Wemos D1 mini
 
     i2c = I2C(scl=Pin(config.SCL_PIN), sda=Pin(config.SDA_PIN), freq=10000)
+    ap = network.WLAN(network.AP_IF)  # create access-point interface
 
-    bme_sensor = BME280.BME280(i2c=i2c, address=int(config.BMP280_ADDRESS))
-    lcd = I2cLcd(
-        i2c, int(config.LCD_ADDRESS), config.LCD_TOTALROWS, config.LCD_TOTALCOLUMNS
-    )
+    if config.ACTIVATE_AP:
+        start_ap(ap)
+        print(f"Starting the access point at {config.AP_SSID}.")
+    else:
+        ap.active(False)  # deactivate the interface
+        print("Access point deactivated.")
 
-    lcd.clear()
-    lcd.hide_cursor()
+    if config.LCD:
+        lcd = I2cLcd(i2c, int(config.LCD_ADDRESS), config.LCD_TOTALROWS, config.LCD_TOTALCOLUMNS)
+        lcd.clear()
+        lcd.hide_cursor()
+    else:
+        lcd = ""
+
     if config.LANGUAGE == "FR":
         lcd.putstr(
             "Bienvenue!\nSysteme vacuum Norm\n{}\n".format(config.CURRENT_VERSION)
         )
     else:
         lcd.putstr("Welcome!\nVacuum system Norm\n{}".format(config.CURRENT_VERSION))
+
+    if config.CONNECT_WIFI:
+        is_connected = connect_to_wifi()
+    else:
+        is_connected = False
     time.sleep(3)
-    lcd.backlight_off()
+    # lcd.backlight_off()
 
-    return dht_sensor, i2c, bme_sensor, lcd
+    return i2c, lcd, is_connected
 
 
-dht_sensor, i2c, bme_sensor, lcd = initialize()
+i2c, lcd, is_connected = initialize()
 while True:
-    run(dht_sensor, i2c, bme_sensor, lcd)
-    time.sleep(30)
+    run(i2c, lcd, is_connected)
+    print(f"Waiting {config.DELAY_READING} seconds before the next reading.")
+    time.sleep(config.DELAY_READING)
