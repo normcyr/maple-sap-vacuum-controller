@@ -61,8 +61,6 @@ AP_SSID = "StationPompage"
 AP_PWD = "Sirop_dErable"
 
 # Wifi network
-
-CONNECT_TO_WIFI = True
 WIFI_SSID = "ma_cabane_a_sucre"
 WIFI_PASSWORD = "j_aime_le_sirop"
 

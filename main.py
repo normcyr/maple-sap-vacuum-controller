@@ -27,10 +27,14 @@ from ntptime import settime
 
 import BME280
 import onewire, ds18x20
-from lcd_api import LcdApi
-from i2c_lcd import I2cLcd
 
 import config
+
+# Load the LCD modules if needed
+if config.LCD:
+    from lcd_api import LcdApi
+    from i2c_lcd import I2cLcd
+
 
 
 def start_ap(ap):
@@ -96,7 +100,7 @@ def get_env_data(i2c):
     
     # Future feature: using a DS18B20 temperature sensor
     if config.ONEWIRE:
-        print("Using OneWire")
+        print("Using OneWire sensor")
         onewire_sensor = ds18x20.DS18X20(onewire.OneWire(config.ONEWIRE_PIN))
         onewire_devices = onewire.scan()
         onewire_sensor.convert_temp()
@@ -189,7 +193,7 @@ def send_data_to_influxdb(env_data, start_vacuum_pump):
 
 def display_data(is_connected, env_data, start_vacuum_pump, lcd):
     # Print the environmental data to the LCD display
-
+    
     lcd.clear()
     lcd.hide_cursor()
     if config.LANGUAGE == "FR":
@@ -240,7 +244,10 @@ def run(i2c, lcd, is_connected):
         env_data = get_env_data(i2c)
         start_vacuum_pump = control_vacuum_pump(env_data)
 
-        display_data(is_connected, env_data, start_vacuum_pump, lcd)
+        if lcd is not None:
+            display_data(is_connected, env_data, start_vacuum_pump, lcd)
+        else:
+            pass
 
         if is_connected:
             if config.SEND_DATA_HTTP:
@@ -272,22 +279,21 @@ def initialize():
         lcd = I2cLcd(i2c, int(config.LCD_ADDRESS), config.LCD_TOTALROWS, config.LCD_TOTALCOLUMNS)
         lcd.clear()
         lcd.hide_cursor()
-    else:
-        lcd = ""
-
-    if config.LANGUAGE == "FR":
-        lcd.putstr(
-            "Bienvenue!\nSysteme vacuum Norm\n{}\n".format(config.CURRENT_VERSION)
+        lcd.backlight_off()
+        if config.LANGUAGE == "FR":
+            lcd.putstr("Bienvenue!\nSysteme vacuum Norm\n{}\n".format(config.CURRENT_VERSION)
         )
+        else:
+            lcd.putstr("Welcome!\nVacuum system Norm\n{}".format(config.CURRENT_VERSION))
+        time.sleep(3)
     else:
-        lcd.putstr("Welcome!\nVacuum system Norm\n{}".format(config.CURRENT_VERSION))
+        print("No LCD configured. Data will not be displayed on a screen.")
+        lcd = None    
 
     if config.CONNECT_WIFI:
         is_connected = connect_to_wifi()
     else:
         is_connected = False
-    time.sleep(3)
-    # lcd.backlight_off()
 
     return i2c, lcd, is_connected
 
